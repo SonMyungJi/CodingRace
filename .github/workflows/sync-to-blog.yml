@@ -1,0 +1,71 @@
+name: Sync LeetCode to Blog
+
+on:
+  push:
+    branches:
+      - main  # LeetCode 코드가 푸시되는 브랜치 이름 (master일 경우 수정)
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. LeetCode 리포지토리 코드 가져오기
+      - name: Checkout LeetCode Repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 2. 이번 커밋에서 새로 추가되거나 변경된 마크다운(.md) 파일 찾기
+      - name: Get Changed Files
+        id: changed-files
+        run: |
+          # 새롭게 추가된 마크다운 파일 탐색
+          FILES=$(git diff-tree --no-commit-id --name-only -r ${{ github.sha }} | grep '\.md$' || true)
+          echo "FILES=$FILES" >> $GITHUB_ENV
+
+      # 3. 마크다운 상단에 프론트 매터(메타데이터) 주입 및 파일 이동
+      - name: Transform and Copy Files
+        if: env.FILES != ''
+        run: |
+          mkdir -p output_posts
+          CURRENT_DATE=$(date +'%Y-%m-%d %H:%M:%S +0900')
+          FILE_DATE=$(date +'%Y-%m-%d')
+          
+          for file in ${{ env.FILES }}; do
+            # 파일명과 문제 제목 추출
+            FILENAME=$(basename "$file")
+            TITLE=$(basename "$file" .md | sed 's/-/ /g' | awk '{for(i=1;i<=NF;i++)sub(/./,toupper(substr($i,1,1)),$i)}1')
+            
+            # 블로그 양식용 파일명 생성 (YYYY-MM-DD-파일명.md)
+            BLOG_FILENAME="${FILE_DATE}-${FILENAME}"
+            
+            echo "Processing: $file -> output_posts/$BLOG_FILENAME"
+            
+            # Jekyll/Hugo 스타일 프론트 매터 작성
+            echo "---" > "output_posts/$BLOG_FILENAME"
+            echo "layout: post" >> "output_posts/$BLOG_FILENAME"
+            echo "title: \"[LeetCode] $TITLE\"" >> "output_posts/$BLOG_FILENAME"
+            echo "date: $CURRENT_DATE" >> "output_posts/$BLOG_FILENAME"
+            echo "categories: [CodingTest, LeetCode]" >> "output_posts/$BLOG_FILENAME"
+            echo "tags: [leetcode, algorithm]" >> "output_posts/$BLOG_FILENAME"
+            echo "---" >> "output_posts/$BLOG_FILENAME"
+            echo "" >> "output_posts/$BLOG_FILENAME"
+            
+            # 기존 LeetCode 본문 내용을 밑에 병합
+            cat "$file" >> "output_posts/$BLOG_FILENAME"
+          done
+
+      # 4. 가공된 파일을 블로그 리포지토리로 자동 푸시
+      - name: Push to Blog Repo
+        if: env.FILES != ''
+        uses: cpina/github-action-push-to-another-repository@main
+        env:
+          API_TOKEN_GITHUB: ${{ secrets.BLOG_PUSH_TOKEN }}
+        with:
+          source-directory: 'output_posts'
+          destination-repository-username: '본인의_깃허브_유저네임'     # 👈 변경 필수
+          destination-repository-name: '본인의_블로그_리포지토리명' # 👈 변경 필수 (예: username.github.io)
+          target-branch: 'main'                                     # 👈 블로그 배포 브랜치
+          target-directory: '_posts'                                # 👈 블로그 포스트 폴더 (Jekyll은 _posts)
+          user-email: '본인의_깃허브_이메일'                       # 👈 변경 필수
+          commit-message: 'Feat: Add LeetCode solution from GitHub Actions'
